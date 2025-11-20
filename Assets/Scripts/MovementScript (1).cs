@@ -5,17 +5,22 @@ using UnityEngine;
 public class RootMotionMovement : MonoBehaviour
 {
     [Header("Movement Settings")]
-    public float speedMultiplier = 1.0f;   // scales horizontal movement
-    public float rotationSpeed = 10f;      // rotation smoothing
-    public float jumpSpeed = 5f;           // jump strength
+    public float speedMultiplier = 1.0f;
+    public float rotationSpeed = 10f;
+    public float jumpSpeed = 5f;
     public float gravity = -9.81f;
+
+    [Header("Air Settings")]
+    public float airControl = 0.5f;  // 0 = no control, 1 = full control
+    public float airDecay = 1.5f;    // how fast momentum fades when no input
 
     private CharacterController controller;
     private Animator animator;
     private Camera mainCamera;
 
-    private Vector3 moveDirection; // horizontal movement
-    private float verticalSpeed;   // vertical velocity
+    private Vector3 moveDirection;
+    private Vector3 lastGroundedMove;
+    private float verticalSpeed;
     private bool isGrounded;
 
     void Start()
@@ -38,26 +43,30 @@ public class RootMotionMovement : MonoBehaviour
 
     void HandleInput()
     {
-        // Only allow horizontal movement when grounded
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+
+        // Build camera-relative direction
+        Vector3 camForward = mainCamera.transform.forward;
+        camForward.y = 0;
+        camForward.Normalize();
+
+        Vector3 camRight = mainCamera.transform.right;
+        camRight.y = 0;
+        camRight.Normalize();
+
+        Vector3 inputDir = (v * camForward + h * camRight);
+
+        if (inputDir.sqrMagnitude > 1f)
+            inputDir.Normalize();
+
+        inputDir *= speedMultiplier;
+
         if (isGrounded)
         {
-            float h = Input.GetAxis("Horizontal");
-            float v = Input.GetAxis("Vertical");
-
-            Vector3 camForward = mainCamera.transform.forward;
-            camForward.y = 0;
-            camForward.Normalize();
-
-            Vector3 camRight = mainCamera.transform.right;
-            camRight.y = 0;
-            camRight.Normalize();
-
-            moveDirection = v * camForward + h * camRight;
-
-            if (moveDirection.sqrMagnitude > 1f)
-                moveDirection.Normalize();
-
-            moveDirection *= speedMultiplier;
+            // Normal grounded movement
+            moveDirection = inputDir;
+            lastGroundedMove = moveDirection;
 
             // Jump
             if (Input.GetButtonDown("Jump"))
@@ -68,8 +77,17 @@ public class RootMotionMovement : MonoBehaviour
         }
         else
         {
-            // Lock horizontal movement midair
-            moveDirection = Vector3.zero;
+            // --- AIR MOVEMENT LOGIC ---
+            if (inputDir.magnitude > 0.01f)
+            {
+                // Air control: steer toward the input direction
+                moveDirection = Vector3.Lerp(moveDirection, inputDir, airControl * Time.deltaTime);
+            }
+            else
+            {
+                // No input: fade momentum gradually
+                moveDirection = Vector3.Lerp(moveDirection, Vector3.zero, airDecay * Time.deltaTime);
+            }
         }
     }
 
@@ -93,7 +111,7 @@ public class RootMotionMovement : MonoBehaviour
         }
         else if (verticalSpeed < 0)
         {
-            verticalSpeed = -0.5f; // small downward force to stick to ground
+            verticalSpeed = -0.5f;
         }
     }
 
@@ -102,26 +120,21 @@ public class RootMotionMovement : MonoBehaviour
         Vector3 velocity = moveDirection;
         velocity.y = verticalSpeed;
 
-        // Apply movement
         controller.Move(velocity * Time.deltaTime);
     }
 
     void UpdateAnimator()
     {
-        // Root motion speed parameter based on horizontal movement
-        Vector3 horizontalMove = moveDirection;
-        horizontalMove.y = 0;
+        Vector3 horizontal = moveDirection;
+        horizontal.y = 0;
 
-        float speedParam = Mathf.Clamp01(horizontalMove.magnitude);
-        animator.SetFloat("Speed", speedParam);
-
-        // Set jump parameter
+        animator.SetFloat("Speed", Mathf.Clamp01(horizontal.magnitude));
         animator.SetBool("IsGrounded", isGrounded);
     }
 
     void OnAnimatorMove()
     {
-        // Apply root motion for horizontal movement when grounded
+        // Root motion ONLY when grounded
         if (animator && isGrounded)
         {
             Vector3 delta = animator.deltaPosition;
